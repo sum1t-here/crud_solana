@@ -1,70 +1,114 @@
-#![allow(clippy::result_large_err)]
+#![allow(clippy::result_large_err)] // Suppresses Clippy warnings about large error types in Results.
 
-use anchor_lang::prelude::*;
+use anchor_lang::prelude::*; // Imports commonly used types and macros from Anchor.
 
-declare_id!("AsjZ3kWAUSQRNt2pZVeJkywhZ6gpLpHZmJjduPmKZDZZ");
+declare_id!("9ezVmmbJmsCrAyodcqcKCrT1Wa365V1p3FDBUS7zz6LG"); // Declares the program's unique identifier.
 
+// Main program module.
 #[program]
 pub mod crudapp {
     use super::*;
 
-  pub fn close(_ctx: Context<CloseCrudapp>) -> Result<()> {
-    Ok(())
-  }
+    // Create a new journal entry.
+    pub fn create_journal_entry(
+        ctx: Context<CreateEntry>,  
+        title: String,              
+        message: String             
+    ) -> Result<()> {              
+        let journal_entry: &mut Account<JournalEntryState> = &mut ctx.accounts.journal_entry; 
+        journal_entry.owner = *ctx.accounts.owner.key;  
+        journal_entry.title = title;                    
+        journal_entry.message = message;                
 
-  pub fn decrement(ctx: Context<Update>) -> Result<()> {
-    ctx.accounts.crudapp.count = ctx.accounts.crudapp.count.checked_sub(1).unwrap();
-    Ok(())
-  }
+        Ok(()) // Indicates success.
+    }
 
-  pub fn increment(ctx: Context<Update>) -> Result<()> {
-    ctx.accounts.crudapp.count = ctx.accounts.crudapp.count.checked_add(1).unwrap();
-    Ok(())
-  }
+    // Update an existing journal entry.
+    pub fn update_journal_entry(
+        ctx: Context<UpdateEntry>,  
+        _title: String,             
+        message: String             
+    ) -> Result<()> {               
+        let journal_entry: &mut Account<JournalEntryState> = &mut ctx.accounts.journal_entry; 
+        journal_entry.message = message; 
 
-  pub fn initialize(_ctx: Context<InitializeCrudapp>) -> Result<()> {
-    Ok(())
-  }
+        Ok(()) // Indicates success.
+    }
 
-  pub fn set(ctx: Context<Update>, value: u8) -> Result<()> {
-    ctx.accounts.crudapp.count = value.clone();
-    Ok(())
-  }
+    // Delete a journal entry.
+    pub fn delete_journal_entry(
+        _ctx: Context<DeleteEntry>,
+        _title: String, 
+    ) -> Result<()> {
+        // Entry is closed and lamports refunded to the owner.
+        Ok(())
+    }
 }
 
+// Accounts required by `create_journal_entry`.
+#[derive(Accounts)] 
+#[instruction(title:String)] // context for the title in seed
+pub struct CreateEntry<'info> {
+    #[account(
+        init,  
+        seeds = [title.as_bytes(), owner.key().as_ref()], 
+        bump,  
+        space = 8 + JournalEntryState::INIT_SPACE,  
+        payer = owner  
+    )]
+    pub journal_entry: Account<'info, JournalEntryState>, 
+
+    #[account(mut)] 
+    pub owner: Signer<'info>,  
+
+    pub system_program: Program<'info, System>,  
+}
+
+// Accounts required by `update_journal_entry`.
+#[derive(Accounts)] 
+#[instruction(title: String)] 
+pub struct UpdateEntry<'info> {
+    #[account(
+        mut,  // The account is mutable because it is being updated.
+        seeds = [title.as_bytes(), owner.key().as_ref()], // PDA generated from the title and owner's public key.
+        bump,  // Bump seed to ensure uniqueness of the PDA.
+        realloc = 8 + JournalEntryState::INIT_SPACE,  // Reallocate memory if the size of the data changes.
+        realloc::payer = owner,  // The owner of the account will pay for the additional space.
+        realloc::zero = true  // The new memory will be zero-initialized for safety.
+    )]
+    pub journal_entry: Account<'info, JournalEntryState>,  
+
+    #[account(mut)] 
+    pub owner: Signer<'info>,  
+
+    pub system_program: Program<'info, System>,  
+}
+
+// Accounts required by `delete_journal_entry`.
 #[derive(Accounts)]
-pub struct InitializeCrudapp<'info> {
-  #[account(mut)]
-  pub payer: Signer<'info>,
+#[instruction(title: String)] 
+pub struct DeleteEntry<'info> {
+    #[account(
+        mut,
+        seeds = [title.as_bytes(), owner.key().as_ref()],
+        bump,
+        close = owner // Closes the account and refunds the rent to the owner.
+    )]
+    pub journal_entry: Account<'info, JournalEntryState>,
 
-  #[account(
-  init,
-  space = 8 + Crudapp::INIT_SPACE,
-  payer = payer
-  )]
-  pub crudapp: Account<'info, Crudapp>,
-  pub system_program: Program<'info, System>,
-}
-#[derive(Accounts)]
-pub struct CloseCrudapp<'info> {
-  #[account(mut)]
-  pub payer: Signer<'info>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
 
-  #[account(
-  mut,
-  close = payer, // close account and return lamports to payer
-  )]
-  pub crudapp: Account<'info, Crudapp>,
+    pub system_program: Program<'info, System>,
 }
 
-#[derive(Accounts)]
-pub struct Update<'info> {
-  #[account(mut)]
-  pub crudapp: Account<'info, Crudapp>,
-}
-
-#[account]
-#[derive(InitSpace)]
-pub struct Crudapp {
-  count: u8,
+// State of the journal entry (stored on-chain).
+#[account] 
+#[derive(InitSpace)] 
+pub struct JournalEntryState {
+    pub owner: Pubkey,  // Owner's public key.
+    #[max_len(50)]  
+    pub title: String,  // Title with a 50-character limit.
+    #[max_len(1000)]  
+    pub message: String,  // Message with a 1000-character limit.
 }
